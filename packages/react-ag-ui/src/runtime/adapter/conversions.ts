@@ -1072,9 +1072,20 @@ function readNamespacedMetadata(metadata: unknown): Record<string, unknown> {
   return isObject(namespaced) ? namespaced : {};
 }
 
+function unresolvedToolCallIds(message: CoreThreadMessageLike): string[] {
+  if (!Array.isArray(message.content)) return [];
+  return message.content.flatMap((part) => {
+    if (!isObject(part) || part.type !== "tool-call") return [];
+    if (part.result !== undefined) return [];
+    const id = getString(part, "toolCallId");
+    return id ? [id] : [];
+  });
+}
+
 function foldTurnRecords(
   previous: CoreThreadMessageLike,
   message: CoreThreadMessageLike,
+  mergePendingToolCallIds: boolean,
 ): CoreThreadMessageLike {
   const interrupts = [
     ...(readPersistedInterrupts(previous.metadata) ?? []),
@@ -1092,10 +1103,24 @@ function foldTurnRecords(
       trailsCalls ? { ...entry, after: true } : entry,
     ),
   ];
+  // A record without the list leaves every call it carries without a result
+  // pending, so the merged list keeps those beside the other record's list.
+  // Joined records an agent named each may carry a list of their own.
+  const previousPending = readPersistedPendingToolCallIds(previous.metadata);
+  const messagePending = readPersistedPendingToolCallIds(message.metadata);
+  const pendingToolCallIds =
+    !mergePendingToolCallIds ||
+    (previousPending === undefined && messagePending === undefined)
+      ? []
+      : [
+          ...(previousPending ?? unresolvedToolCallIds(previous)),
+          ...(messagePending ?? unresolvedToolCallIds(message)),
+        ];
   const namespaced = {
     ...readNamespacedMetadata(previous.metadata),
     ...readNamespacedMetadata(message.metadata),
     ...(interrupts.length > 0 ? { interrupts } : {}),
+    ...(pendingToolCallIds.length > 0 ? { pendingToolCallIds } : {}),
     ...(opaqueReasoning.length > 0 ? { opaqueReasoning } : {}),
   } satisfies AgUiCustomMetadata & Record<string, unknown>;
   const custom = {
@@ -1131,6 +1156,16 @@ export type FromAgUiMessagesOptions = {
    * Matches the `showThinking` option of `useAgUiRuntime`. Defaults to `true`.
    */
   showThinking?: boolean;
+  /**
+   * Whether to join every run of adjacent assistant records into one message,
+   * for a backend whose history splits one turn across records with ids of
+   * their own. The merged message keeps the id of the record carrying the
+   * answer, with the parts in wire order. Records that belong to separate runs
+   * are joined too when no user message separates them. Matches the
+   * `joinAdjacentAssistantMessages` option of `useAgUiRuntime`. Defaults to
+   * `false`.
+   */
+  joinAdjacentAssistantMessages?: boolean;
 };
 
 export function fromAgUiMessages(
@@ -1138,6 +1173,8 @@ export function fromAgUiMessages(
   options?: FromAgUiMessagesOptions,
 ): CoreThreadMessageLike[] {
   const showThinking = options?.showThinking ?? true;
+  const joinAdjacentAssistantMessages =
+    options?.joinAdjacentAssistantMessages ?? false;
   const converted: CoreThreadMessageLike[] = [];
   const a2uiBuckets = new Map<string, A2uiState>();
   const a2uiBucketOwnerIndices = new Map<string, number>();
@@ -1499,7 +1536,9 @@ export function fromAgUiMessages(
   // a container beside the records around it, which the live run renders as
   // one message: the container joins the assistant record ahead of it, and
   // what follows a container joins it until the turn carries text, where a
-  // further text record opens a message of its own as it does live.
+  // further text record opens a message of its own as it does live. An app
+  // that knows its backend splits a turn across records it named itself opts
+  // into joining every assistant record that follows one opening a turn.
   const folded: CoreThreadMessageLike[] = [];
   for (const message of converted) {
     const previous = folded[folded.length - 1];
@@ -1507,10 +1546,17 @@ export function fromAgUiMessages(
       previous !== undefined &&
       (isSyntheticToolCallContainer(message)
         ? opensTurn(previous)
-        : isSyntheticToolCallContainer(previous) &&
-          answersToolCallContainer(message))
+        : (isSyntheticToolCallContainer(previous) &&
+            answersToolCallContainer(message)) ||
+          (joinAdjacentAssistantMessages &&
+            message.role === "assistant" &&
+            opensTurn(previous)))
     ) {
-      folded[folded.length - 1] = foldTurnRecords(previous, message);
+      folded[folded.length - 1] = foldTurnRecords(
+        previous,
+        message,
+        joinAdjacentAssistantMessages,
+      );
       continue;
     }
     folded.push(message);
