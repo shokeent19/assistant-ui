@@ -68,7 +68,7 @@ for (const author of ["alice", "admin"]) {
       status: "success",
       unmet: [],
       waived: [],
-      approvals: { counted: [], ignored: [] },
+      approvals: { counted: [], ignored: [], carried: [] },
     });
   });
 }
@@ -261,6 +261,7 @@ test("a T2 contract area accepts its sole owner-team approval", () => {
   assert.deepEqual(result.approvals, {
     counted: ["owner-only"],
     ignored: [],
+    carried: [],
   });
 });
 
@@ -375,7 +376,11 @@ for (const state of ["CHANGES_REQUESTED", "DISMISSED"]) {
     for (const ordered of [reviews, reviews.toReversed()]) {
       const result = evaluateRequirements(input({ reviews: ordered }), policy);
       assert.equal(result.status, "pending");
-      assert.deepEqual(result.approvals, { counted: [], ignored: [] });
+      assert.deepEqual(result.approvals, {
+        counted: [],
+        ignored: [],
+        carried: [],
+      });
     }
   });
 }
@@ -398,10 +403,14 @@ for (const state of ["COMMENTED", "PENDING"]) {
       }),
       policy,
     );
-    assert.deepEqual(rejected.approvals, { counted: [], ignored: [] });
+    assert.deepEqual(rejected.approvals, {
+      counted: [],
+      ignored: [],
+      carried: [],
+    });
     assert.deepEqual(
       evaluateRequirements(input({ reviews: [later] }), policy).approvals,
-      { counted: [], ignored: [] },
+      { counted: [], ignored: [], carried: [] },
     );
   });
 }
@@ -421,7 +430,11 @@ test("the latest approval restores a reviewer once and uses its commit SHA", () 
     policy,
   );
   assert.equal(result.status, "success");
-  assert.deepEqual(result.approvals, { counted: ["alice"], ignored: [] });
+  assert.deepEqual(result.approvals, {
+    counted: ["alice"],
+    ignored: [],
+    carried: [],
+  });
   const stale = evaluateRequirements(
     input({
       reviews: [
@@ -458,6 +471,7 @@ for (const { login, isBot, commitSha, reason } of [
     assert.deepEqual(result.approvals, {
       counted: [],
       ignored: [{ login, reason }],
+      carried: [],
     });
   });
 }
@@ -496,6 +510,7 @@ test("an approval before autofix commits is stale", () => {
   assert.deepEqual(result.approvals, {
     counted: [],
     ignored: [{ login: "alice", reason: "stale" }],
+    carried: [],
   });
 });
 
@@ -514,6 +529,7 @@ for (const author of ["contributor", null, "other[bot]"]) {
     assert.deepEqual(result.approvals, {
       counted: [],
       ignored: [{ login: "alice", reason: "stale" }],
+      carried: [],
     });
   });
 }
@@ -546,7 +562,11 @@ for (const commitSha of [null, "missing"]) {
         input({ reviews: [review("alice", { commitSha })] }),
         policy,
       ).approvals,
-      { counted: [], ignored: [{ login: "alice", reason: "stale" }] },
+      {
+        counted: [],
+        ignored: [{ login: "alice", reason: "stale" }],
+        carried: [],
+      },
     );
   });
 }
@@ -594,6 +614,7 @@ test("a commit author and committer are both contributors", () => {
       { login: "alice", reason: "contributor" },
       { login: "bob", reason: "contributor" },
     ],
+    carried: [],
   });
 });
 
@@ -648,6 +669,7 @@ test("web-flow committer excludes nobody else", () => {
   assert.deepEqual(result.approvals, {
     counted: ["alice", "bob"],
     ignored: [],
+    carried: [],
   });
 });
 
@@ -1061,7 +1083,11 @@ test("the merged reactivity PR still needs ownership, a decision and time", () =
   );
   assert.equal(result.status, "pending");
   assert.deepEqual(codes(result), ["decision", "owner:reactivity", "window"]);
-  assert.deepEqual(result.approvals, { counted: ["Kinfe123"], ignored: [] });
+  assert.deepEqual(result.approvals, {
+    counted: ["Kinfe123"],
+    ignored: [],
+    carried: [],
+  });
   assert.deepEqual(result.waived, []);
 });
 
